@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ludo Admin</title>
+<link rel="manifest" href="/admin-manifest.json">
+<meta name="theme-color" content="#12121f">
+<link rel="icon" href="/admin-icon-192.png">
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:system-ui,"Segoe UI",Roboto,sans-serif; color:#fff; min-height:100vh;
+         background: radial-gradient(circle at 50% 0%, #2b2b4a, #12121f 70%); }
+  .wrap { max-width:520px; margin:0 auto; padding:14px; }
+  h1 { text-align:center; font-size:24px; letter-spacing:3px; color:#ffcf4a; margin:14px 0; }
+  .card { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); border-radius:16px; padding:14px; margin-bottom:12px; }
+  input { width:100%; padding:13px; border-radius:12px; border:0; font-size:16px; margin-bottom:10px; background:#fff; color:#222; }
+  button { cursor:pointer; border:0; border-radius:12px; padding:11px 14px; font-size:15px; font-weight:700; color:#3a2400;
+           background:linear-gradient(#ffe27a,#f5a623); box-shadow:0 4px 0 #a8700d; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #a8700d; }
+  button.kick { background:linear-gradient(#ff9a9a,#e53935); color:#fff; box-shadow:0 4px 0 #8f1d1a; }
+  .hide { display:none !important; }
+  .room { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .code { font-weight:800; letter-spacing:3px; color:#ffcf4a; font-size:20px; }
+  .badge { font-size:12px; padding:3px 9px; border-radius:99px; background:rgba(255,255,255,.15); }
+  .player { border-top:1px solid rgba(255,255,255,.12); padding:10px 0; }
+  .pname { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-weight:600; }
+  .dot { width:14px; height:14px; border-radius:50%; display:inline-block; }
+  .turn { color:#8dff8d; font-size:12px; margin-left:auto; }
+  .dice { display:flex; gap:6px; }
+  .dice button { flex:1; padding:12px 0; font-size:18px; background:linear-gradient(#fff,#cfcfcf); color:#222; box-shadow:0 4px 0 #8a8a8a; }
+  .dice button.on { background:linear-gradient(#8dff8d,#2ecc71); box-shadow:0 4px 0 #1b8a4b; }
+  .row { display:flex; gap:8px; align-items:center; margin-top:8px; font-size:13px; opacity:.85; }
+  #err { color:#ff9a9a; text-align:center; min-height:20px; }
+  .empty { text-align:center; opacity:.6; padding:20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ADMIN CONTROL</h1>
+
+  <div id="login" class="card">
+    <input id="secret" type="password" placeholder="Admin password">
+    <button id="loginBtn" style="width:100%">Login</button>
+    <div id="err"></div>
+  </div>
+
+  <div id="panel" class="hide">
+    <div class="card" style="font-size:13px;opacity:.85">
+      Pick a number for a player: it is used on their <b>next roll</b> only. Tap the same number again to cancel.
+      Other players cannot see this.
+    </div>
+    <div id="rooms"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(() => {
+  const COLORS = ['#e53935', '#43a047', '#fdd835', '#1e88e5'];
+  const NAMES = ['Red', 'Green', 'Yellow', 'Blue'];
+  const $ = id => document.getElementById(id);
+  const socket = io();
+  let timer = null;
+
+  function login() {
+    socket.emit('admin:login', { secret: $('secret').value }, r => {
+      if (!r || !r.ok) { $('err').textContent = 'Wrong password'; return; }
+      sessionStorage.setItem('as', $('secret').value);
+      $('login').classList.add('hide'); $('panel').classList.remove('hide');
+      refresh(); timer = setInterval(refresh, 2000);
+    });
+  }
+  $('loginBtn').onclick = login;
+  $('secret').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+
+  // auto re-login after a reconnect (server restart / network drop)
+  socket.on('connect', () => {
+    const s = sessionStorage.getItem('as');
+    if (s && !$('panel').classList.contains('hide')) socket.emit('admin:login', { secret: s }, () => {});
+  });
+
+  function refresh() {
+    socket.emit('admin:listRooms', null, list => render(list || []));
+  }
+
+  function render(list) {
+    if (!list.length) { $('rooms').innerHTML = '<div class="empty">No active rooms yet</div>'; return; }
+    $('rooms').innerHTML = list.map(r => `
+      <div class="card">
+        <div class="room"><span class="code">${r.room}</span>
+          <span class="badge">${r.started ? 'In game' : 'Lobby'}</span></div>
+        ${r.players.map(p => {
+          const f = (r.forced || {})[p.seat];
+          return `<div class="player">
+            <div class="pname"><span class="dot" style="background:${COLORS[p.seat]}"></span>${esc(p.name)}
+              <span style="opacity:.6;font-weight:400">(${NAMES[p.seat]})</span>
+              ${r.turnSeat === p.seat ? '<span class="turn">● their turn</span>' : ''}</div>
+            <div class="dice">${[1,2,3,4,5,6].map(n =>
+              `<button class="${f === n ? 'on' : ''}" data-room="${r.room}" data-seat="${p.seat}" data-v="${n}">${n}</button>`).join('')}</div>
+            <div class="row"><span>${f ? 'Next roll: <b>' + f + '</b>' : 'Next roll: random'}</span>
+              <button class="kick" style="margin-left:auto;padding:6px 12px;font-size:13px" data-kick="${r.room}" data-seat="${p.seat}">Kick</button></div>
+          </div>`;
+        }).join('')}
+      </div>`).join('');
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  $('rooms').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.v) {
+      const on = b.classList.contains('on');
+      // tapping the active number again cancels it (value 0 = random)
+      socket.emit('admin:setDice', { room: b.dataset.room, seat: +b.dataset.seat, value: on ? 0 : +b.dataset.v }, refresh);
+    } else if (b.dataset.kick) {
+      if (confirm('Kick this player?')) { socket.emit('admin:kick', { room: b.dataset.kick, seat: +b.dataset.seat }); setTimeout(refresh, 400); }
+    }
+  });
+})();
+</script>
+<script>if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
+</body>
+</html>

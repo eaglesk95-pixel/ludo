@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ludo</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1b1448">
+<link rel="icon" href="/icon-192.png">
+<style>
+  :root { --bg1:#1b1448; --bg2:#4a1d7a; --gold:#ffcf4a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html,body { margin:0; height:100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; color:#fff;
+    background: radial-gradient(circle at 50% 0%, var(--bg2), var(--bg1) 70%); overflow-x:hidden; }
+  #lobby, #game { max-width: 480px; margin: 0 auto; padding: 14px; }
+  h1 { text-align:center; letter-spacing:4px; margin: 18px 0 6px; color: var(--gold);
+       text-shadow: 0 3px 0 #a56a00, 0 8px 18px rgba(0,0,0,.45); font-size: 38px; }
+  .sub { text-align:center; opacity:.75; margin-bottom: 20px; }
+  .card { background: rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18); border-radius:18px;
+          padding:16px; backdrop-filter: blur(6px); margin-bottom:14px; }
+  input { width:100%; padding:13px 14px; border-radius:12px; border:0; font-size:16px; margin-bottom:10px;
+          background:#fff; color:#222; }
+  button { cursor:pointer; border:0; border-radius:14px; padding:13px 18px; font-size:16px; font-weight:700; color:#3a2400;
+           background: linear-gradient(#ffe27a,#f5a623); box-shadow: 0 5px 0 #a8700d, 0 10px 16px rgba(0,0,0,.35);
+           transition: transform .08s, box-shadow .08s; }
+  button:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 1px 0 #a8700d; }
+  button:disabled { filter: grayscale(.9); opacity:.55; cursor:default; }
+  button.alt { background: linear-gradient(#8fd3ff,#2e86de); color:#06243f; box-shadow: 0 5px 0 #1b5391, 0 10px 16px rgba(0,0,0,.35); }
+  .row { display:flex; gap:10px; } .row > * { flex:1; }
+  #players { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .chip { padding:6px 12px; border-radius:99px; font-size:14px; font-weight:600; border:2px solid transparent; background:rgba(0,0,0,.3); }
+  .chip.turn { border-color:#fff; box-shadow:0 0 14px currentColor; transform: scale(1.06); }
+  #top { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:14px; }
+  #roomCode { font-weight:800; letter-spacing:3px; color:var(--gold); font-size:18px; }
+  #boardWrap { position:relative; border-radius:16px; overflow:hidden; box-shadow:0 14px 40px rgba(0,0,0,.55); }
+  canvas { display:block; width:100%; touch-action:manipulation; }
+  #controls { display:flex; align-items:center; justify-content:center; gap:26px; margin-top:16px; min-height:110px; }
+  #diceScene { width:80px; height:80px; perspective:400px; }
+  #dice { width:80px; height:80px; position:relative; transform-style:preserve-3d; transition: transform 1s cubic-bezier(.2,.8,.25,1); }
+  .face { position:absolute; width:80px; height:80px; background: linear-gradient(145deg,#fff,#dcdcdc); border-radius:14px;
+          border:1px solid #bbb; backface-visibility:hidden; display:grid; grid-template:repeat(3,1fr)/repeat(3,1fr); padding:11px; }
+  .pip { width:15px; height:15px; border-radius:50%; background: radial-gradient(circle at 35% 30%,#555,#000); align-self:center; justify-self:center; }
+  .face.f1 .pip { background: radial-gradient(circle at 35% 30%,#ff6b6b,#b00000); }
+  #msg { text-align:center; margin-top:10px; min-height:22px; opacity:.9; }
+  #rollBtn { min-width:150px; font-size:20px; }
+  .hide { display:none !important; }
+  #winner { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:9; text-align:center; padding:20px; }
+  #winner h2 { font-size:34px; color:var(--gold); margin:0; }
+</style>
+</head>
+<body>
+
+<div id="lobby">
+  <h1>LUDO</h1>
+  <div class="sub">Play with friends, from anywhere</div>
+  <div class="card">
+    <input id="name" placeholder="Your name" maxlength="14">
+    <div class="row"><button id="createBtn">Create room</button></div>
+    <div style="text-align:center;margin:12px 0;opacity:.7">or</div>
+    <input id="roomInput" placeholder="Room code" maxlength="4" style="text-transform:uppercase">
+    <div class="row"><button id="joinBtn" class="alt">Join room</button></div>
+  </div>
+  <div id="waiting" class="card hide">
+    <div>Room: <span id="roomCode2" style="font-weight:800;letter-spacing:3px;color:#ffcf4a;font-size:22px"></span></div>
+    <div id="lobbyPlayers" style="margin:10px 0"></div>
+    <button id="startBtn" class="hide">Start game</button>
+    <div id="waitMsg" style="opacity:.75">Waiting for the host to start...</div>
+  </div>
+  <div id="err" style="color:#ff9a9a;text-align:center"></div>
+</div>
+
+<div id="game" class="hide">
+  <div id="top"><div>Room <span id="roomCode"></span></div><div id="muteBtn" style="cursor:pointer">🔊</div></div>
+  <div id="boardWrap"><canvas id="board"></canvas></div>
+  <div id="players"></div>
+  <div id="controls">
+    <div id="diceScene"><div id="dice"></div></div>
+    <button id="rollBtn" disabled>ROLL</button>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<div id="winner" class="hide"><h2 id="winnerText"></h2><button id="againBtn">OK</button></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(() => {
+  const COLORS = ['#e53935', '#43a047', '#fdd835', '#1e88e5'];
+  const DARK   = ['#9f1d1a', '#2a6d2e', '#b89b00', '#12589f'];
+  const START = [0, 13, 26, 39];
+  const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
+
+  // ---- board geometry (15x15 grid, cell coordinates) ----
+  const TRACK = [[1,6],[2,6],[3,6],[4,6],[5,6],[6,5],[6,4],[6,3],[6,2],[6,1],[6,0],[7,0],[8,0],
+    [8,1],[8,2],[8,3],[8,4],[8,5],[9,6],[10,6],[11,6],[12,6],[13,6],[14,6],[14,7],[14,8],
+    [13,8],[12,8],[11,8],[10,8],[9,8],[8,9],[8,10],[8,11],[8,12],[8,13],[8,14],[7,14],[6,14],
+    [6,13],[6,12],[6,11],[6,10],[6,9],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8],[0,7],[0,6]];
+  const HOME = [
+    [[1,7],[2,7],[3,7],[4,7],[5,7]],
+    [[7,1],[7,2],[7,3],[7,4],[7,5]],
+    [[13,7],[12,7],[11,7],[10,7],[9,7]],
+    [[7,13],[7,12],[7,11],[7,10],[7,9]],
+  ];
+  const YARD = [[0,0],[9,0],[9,9],[0,9]];
+  const FIN_OFF = [[-0.55,0],[0,-0.55],[0.55,0],[0,0.55]];
+
+  function xy(seat, rel, t) {
+    if (rel === -1) { const [ox, oy] = YARD[seat]; return [ox + 2 + (t % 2) * 2, oy + 2 + (t >> 1) * 2]; }
+    if (rel <= 50) { const c = TRACK[(START[seat] + rel) % 52]; return [c[0] + .5, c[1] + .5]; }
+    if (rel <= 55) { const c = HOME[seat][rel - 51]; return [c[0] + .5, c[1] + .5]; }
+    const o = FIN_OFF[seat]; return [7.5 + o[0] + (t - 1.5) * 0.12 * (o[1] === 0 ? 0 : 1), 7.5 + o[1] + (t - 1.5) * 0.12 * (o[0] === 0 ? 0 : 1)];
+  }
+
+  // ---- sound (synthesised, no files needed) ----
+  let actx = null, muted = false;
+  const ac = () => (actx ||= new (window.AudioContext || window.webkitAudioContext)());
+  function tone(f, dur, type = 'sine', vol = 0.15, slide = 0) {
+    if (muted) return; const a = ac(); const o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.value = f; if (slide) o.frequency.linearRampToValueAtTime(f + slide, a.currentTime + dur);
+    g.gain.setValueAtTime(vol, a.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + dur);
+  }
+  function noiseClick(vol = 0.2) {
+    if (muted) return; const a = ac(); const len = 0.04 * a.sampleRate; const b = a.createBuffer(1, len, a.sampleRate);
+    const d = b.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const s = a.createBufferSource(); s.buffer = b; const g = a.createGain(); g.gain.value = vol; s.connect(g); g.connect(a.destination); s.start();
+  }
+  const sfx = {
+    roll() { for (let i = 0; i < 9; i++) setTimeout(() => noiseClick(0.25), i * 90); },
+    step() { tone(520, 0.08, 'triangle', 0.18); },
+    out()  { tone(400, 0.12, 'square', 0.1, 400); },
+    capture() { tone(500, 0.35, 'sawtooth', 0.12, -380); },
+    home() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'triangle', 0.18), i * 110)); },
+    win()  { [523, 659, 784, 1046, 784, 1046, 1318].forEach((f, i) => setTimeout(() => tone(f, 0.3, 'triangle', 0.2), i * 140)); },
+  };
+
+  // ---- 3D dice ----
+  const diceEl = document.getElementById('dice');
+  const PIPS = { 1:[5], 2:[1,9], 3:[1,5,9], 4:[1,3,7,9], 5:[1,3,5,7,9], 6:[1,3,4,6,7,9] };
+  const FACE = [ ['f1',1,'rotateY(0deg)'], ['f6',6,'rotateY(180deg)'], ['f2',2,'rotateY(90deg)'],
+                 ['f5',5,'rotateY(-90deg)'], ['f3',3,'rotateX(90deg)'], ['f4',4,'rotateX(-90deg)'] ];
+  FACE.forEach(([cls, n, rot]) => {
+    const f = document.createElement('div'); f.className = 'face ' + cls; f.style.transform = rot + ' translateZ(40px)';
+    for (let c = 1; c <= 9; c++) { const cell = document.createElement('div'); if (PIPS[n].includes(c)) cell.className = 'pip'; f.appendChild(cell); }
+    diceEl.appendChild(f);
+  });
+  const SHOW = { 1:[0,0], 6:[0,180], 2:[0,-90], 5:[0,90], 3:[-90,0], 4:[90,0] };
+  let spin = 0;
+  function showDice(v) {
+    spin++; const [x, y] = SHOW[v];
+    diceEl.style.transform = `rotateX(${x + 720 * spin}deg) rotateY(${y + 720 * spin}deg)`;
+  }
+  diceEl.style.transform = 'rotateX(-20deg) rotateY(25deg)';
+
+  // ---- state ----
+  const $ = id => document.getElementById(id);
+  const socket = io();
+  let mySeat = -1, roomCode = '', lobbyPlayers = [], cur = null, shown = [], movable = [], busy = false, anim = null;
+  let queue = Promise.resolve();
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const nameOf = seat => (lobbyPlayers.find(p => p.seat === seat) || {}).name || ('P' + (seat + 1));
+  const curSeat = () => cur ? cur.players[cur.turn].seat : -1;
+
+  function err(t) { $('err').textContent = t || ''; }
+
+  $('createBtn').onclick = () => {
+    ac().resume(); const name = $('name').value.trim() || 'Player';
+    socket.emit('createRoom', { name }, r => { if (r.ok) enterWaiting(r.room, r.seat, [{ name, seat: 0 }]); });
+  };
+  $('joinBtn').onclick = () => {
+    ac().resume(); const name = $('name').value.trim() || 'Player'; const room = $('roomInput').value.trim().toUpperCase();
+    socket.emit('joinRoom', { name, room }, r => { if (r.ok) enterWaiting(r.room, r.seat, null); else err(r.error); });
+  };
+  $('startBtn').onclick = () => socket.emit('startGame');
+  $('rollBtn').onclick = () => { ac().resume(); $('rollBtn').disabled = true; socket.emit('rollDice'); };
+  $('muteBtn').onclick = () => { muted = !muted; $('muteBtn').textContent = muted ? '🔇' : '🔊'; };
+  $('againBtn').onclick = () => location.reload();
+
+  function enterWaiting(room, seat, players) {
+    roomCode = room; mySeat = seat; err('');
+    $('waiting').classList.remove('hide'); $('roomCode2').textContent = room; $('roomCode').textContent = room;
+    if (players) renderLobby(players);
+    $('startBtn').classList.toggle('hide', seat !== 0); $('waitMsg').classList.toggle('hide', seat === 0);
+  }
+  function renderLobby(players) {
+    lobbyPlayers = players;
+    $('lobbyPlayers').innerHTML = players.map(p => `<span class="chip" style="color:${COLORS[p.seat]}">${p.name}</span> `).join('');
+  }
+  socket.on('lobby', d => { renderLobby(d.players); });
+  socket.on('state', d => {
+    lobbyPlayers = d.players; cur = d.state; shown = cur.players.map(p => p.tokens.slice());
+    $('lobby').classList.add('hide'); $('game').classList.remove('hide'); resize(); updateUI();
+    setMsg(curSeat() === mySeat ? 'Your turn — roll the dice!' : nameOf(curSeat()) + "'s turn");
+  });
+
+  socket.on('rolled', ev => { queue = queue.then(() => onRolled(ev)); });
+  socket.on('moved',  ev => { queue = queue.then(() => onMoved(ev)); });
+
+  async function onRolled(ev) {
+    if (!ev.ok) return;
+    busy = true; movable = []; updateUI(); sfx.roll(); showDice(ev.dice); await sleep(1000);
+    cur = ev.state;
+    if (ev.passed) {
+      setMsg(ev.reason === 'three sixes' ? 'Three sixes — turn lost!' : 'No move possible');
+      await sleep(700);
+    } else if (curSeat() === mySeat) {
+      movable = ev.moves; setMsg('Tap a glowing token to move');
+      if (ev.moves.length === 1) { /* single choice: still let the player tap, keeps control */ }
+    } else setMsg(nameOf(curSeat()) + ' is choosing...');
+    busy = false; updateUI();
+  }
+
+  async function onMoved(ev) {
+    if (!ev.ok) return;
+    busy = true; movable = [];
+    const mi = cur.turn, t = ev.token; const from = shown[mi][t], to = ev.to, seat = cur.players[mi].seat;
+    if (from === -1) { sfx.out(); await hop(mi, seat, t, -1, 0); }
+    else for (let r = from + 1; r <= to; r++) { sfx.step(); await hop(mi, seat, t, r - 1, r); }
+    shown[mi][t] = to;
+    if (to === 56) sfx.home();
+    if (ev.captured) { sfx.capture(); shown[ev.captured.player][ev.captured.token] = -1; await sleep(350); }
+    cur = ev.state; busy = false; updateUI();
+    if (ev.gameOver) {
+      sfx.win(); const w = cur.winners.map(i => nameOf(cur.players[i].seat));
+      $('winnerText').textContent = '🏆 ' + w[0] + ' wins!'; $('winner').classList.remove('hide');
+      return;
+    }
+    setMsg(curSeat() === mySeat ? (ev.extraTurn ? 'Extra turn — roll again!' : 'Your turn — roll the dice!') : nameOf(curSeat()) + "'s turn");
+  }
+
+  function hop(pi, seat, t, a, b) {
+    return new Promise(res => { anim = { pi, seat, t, a, b, t0: performance.now(), dur: 170, res }; });
+  }
+
+  function setMsg(t) { $('msg').textContent = t; }
+  function updateUI() {
+    if (!cur) return;
+    $('players').innerHTML = cur.players.map((p, i) => {
+      const done = p.tokens.filter(x => x === 56).length;
+      return `<span class="chip ${i === cur.turn ? 'turn' : ''}" style="color:${COLORS[p.seat]}">${nameOf(p.seat)} · ${done}/4</span>`;
+    }).join('');
+    $('rollBtn').disabled = !(curSeat() === mySeat && !cur.rolled && !busy && cur.winners.length < cur.players.length - 1);
+  }
+
+  // ---- canvas drawing ----
+  const cv = $('board'), ctx = cv.getContext('2d'); let S = 480, U = 32;
+  function resize() {
+    S = Math.min(cv.parentElement.clientWidth || 480, 520); const d = window.devicePixelRatio || 1;
+    cv.width = S * d; cv.height = S * d; cv.style.height = S + 'px'; ctx.setTransform(d, 0, 0, d, 0, 0); U = S / 15;
+  }
+  window.addEventListener('resize', () => { if (!$('game').classList.contains('hide')) resize(); });
+
+  function drawBoard() {
+    ctx.clearRect(0, 0, S, S);
+    const bg = ctx.createLinearGradient(0, 0, S, S); bg.addColorStop(0, '#fff8e6'); bg.addColorStop(1, '#ffe9b0');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, S, S);
+    // yards
+    YARD.forEach(([ox, oy], s) => {
+      const g = ctx.createLinearGradient(ox * U, oy * U, (ox + 6) * U, (oy + 6) * U); g.addColorStop(0, COLORS[s]); g.addColorStop(1, DARK[s]);
+      ctx.fillStyle = g; ctx.fillRect(ox * U, oy * U, 6 * U, 6 * U);
+      ctx.fillStyle = 'rgba(255,255,255,.92)'; rr((ox + 1) * U, (oy + 1) * U, 4 * U, 4 * U, U * .5); ctx.fill();
+      for (let k = 0; k < 4; k++) { const [x, y] = xy(s, -1, k); ctx.fillStyle = COLORS[s] + '55'; circ(x * U, y * U, U * .5); ctx.fill(); }
+    });
+    // track cells
+    TRACK.forEach(([c, r], i) => {
+      const start = START.indexOf(i);
+      ctx.fillStyle = start >= 0 ? COLORS[start] : '#fff'; ctx.fillRect(c * U, r * U, U, U);
+      ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.strokeRect(c * U + .5, r * U + .5, U - 1, U - 1);
+      if (SAFE.has(i) && start < 0) star((c + .5) * U, (r + .5) * U, U * .32, '#999');
+      else if (start >= 0) star((c + .5) * U, (r + .5) * U, U * .3, 'rgba(255,255,255,.85)');
+    });
+    HOME.forEach((col, s) => col.forEach(([c, r]) => {
+      ctx.fillStyle = COLORS[s]; ctx.fillRect(c * U, r * U, U, U);
+      ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.strokeRect(c * U + .5, r * U + .5, U - 1, U - 1);
+    }));
+    // centre
+    const C = 7.5 * U, a = 6 * U, b = 9 * U;
+    [[a, a, a, b], [a, a, b, a], [b, a, b, b], [a, b, b, b]].forEach((_, s) => {});
+    tri([a, a], [a, b], [C, C], COLORS[0]); tri([a, a], [b, a], [C, C], COLORS[1]);
+    tri([b, a], [b, b], [C, C], COLORS[2]); tri([a, b], [b, b], [C, C], COLORS[3]);
+  }
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function circ(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); }
+  function tri(p, q, r, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.lineTo(...r); ctx.closePath(); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.stroke(); }
+  function star(x, y, r, col) {
+    ctx.fillStyle = col; ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const rad = i % 2 ? r * .45 : r, ang = -Math.PI / 2 + i * Math.PI / 5; ctx.lineTo(x + rad * Math.cos(ang), y + rad * Math.sin(ang)); }
+    ctx.closePath(); ctx.fill();
+  }
+
+  function tokenPos(pi, t, now) {
+    const seat = cur.players[pi].seat;
+    if (anim && anim.pi === pi && anim.t === t) {
+      const k = Math.min(1, (now - anim.t0) / anim.dur);
+      const [x1, y1] = xy(seat, anim.a, t), [x2, y2] = xy(seat, anim.b, t);
+      return [x1 + (x2 - x1) * k, y1 + (y2 - y1) * k - Math.sin(k * Math.PI) * 0.45, k];
+    }
+    const [x, y] = xy(seat, shown[pi][t], t); return [x, y, 0];
+  }
+
+  function drawTokens(now) {
+    const items = [];
+    cur.players.forEach((p, pi) => p.tokens.forEach((_, t) => items.push({ pi, t, seat: p.seat, p: tokenPos(pi, t, now) })));
+    // offset tokens sharing a cell slightly
+    const groups = {};
+    items.forEach(it => { const k = it.p[0].toFixed(1) + ',' + it.p[1].toFixed(1); (groups[k] ||= []).push(it); });
+    Object.values(groups).forEach(g => g.forEach((it, i) => { if (g.length > 1) { it.p[0] += (i - (g.length - 1) / 2) * 0.18; } }));
+    items.sort((a, b) => a.p[1] - b.p[1]);
+    const mine = curSeat() === mySeat;
+    items.forEach(it => {
+      const x = it.p[0] * U, y = it.p[1] * U, r = U * .36, lift = it.p[2] ? U * .1 : 0;
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x, y + r * .7, r * .9, r * .4, 0, 0, 7); ctx.fill();
+      const g = ctx.createRadialGradient(x - r * .3, y - r * .4 - lift, r * .1, x, y - lift, r * 1.1);
+      g.addColorStop(0, '#fff'); g.addColorStop(.25, COLORS[it.seat]); g.addColorStop(1, DARK[it.seat]);
+      ctx.fillStyle = g; circ(x, y - lift, r); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      if (mine && !busy && cur.players[it.pi].seat === mySeat && it.pi === cur.turn && movable.includes(it.t)) {
+        const pulse = (Math.sin(now / 160) + 1) / 2;
+        ctx.strokeStyle = `rgba(255,255,255,${.5 + pulse * .5})`; ctx.lineWidth = 3; circ(x, y - lift, r + 4 + pulse * 4); ctx.stroke();
+      }
+    });
+  }
+
+  function frame(now) {
+    if (cur && !$('game').classList.contains('hide')) {
+      drawBoard(); drawTokens(now);
+      if (anim && now - anim.t0 >= anim.dur) { const r = anim.res; anim = null; r(); }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  cv.addEventListener('pointerdown', e => {
+    if (!cur || busy || curSeat() !== mySeat || !movable.length) return;
+    const rect = cv.getBoundingClientRect(), mx = (e.clientX - rect.left) / rect.width * 15, my = (e.clientY - rect.top) / rect.height * 15;
+    let best = null, bd = 1e9; const now = performance.now();
+    movable.forEach(t => { const [x, y] = tokenPos(cur.turn, t, now); const d = Math.hypot(x - mx, y - my); if (d < bd) { bd = d; best = t; } });
+    if (best !== null && bd < 1.1) { const tk = best; movable = []; ac().resume(); socket.emit('moveToken', { token: tk }); }
+  });
+})();
+</script>
+<script>if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
+</body>
+</html>
