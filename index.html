@@ -34,15 +34,20 @@
   #roomCode { font-weight:800; letter-spacing:3px; color:var(--gold); font-size:18px; }
   #boardWrap { position:relative; border-radius:16px; overflow:hidden; box-shadow:0 14px 40px rgba(0,0,0,.55); }
   canvas { display:block; width:100%; touch-action:manipulation; }
-  #controls { display:flex; align-items:center; justify-content:center; gap:26px; margin-top:16px; min-height:110px; }
-  #diceScene { width:80px; height:80px; perspective:400px; }
-  #dice { width:80px; height:80px; position:relative; transform-style:preserve-3d; transition: transform 1s cubic-bezier(.2,.8,.25,1); }
-  .face { position:absolute; width:80px; height:80px; background: linear-gradient(145deg,#fff,#dcdcdc); border-radius:14px;
-          border:1px solid #bbb; backface-visibility:hidden; display:grid; grid-template:repeat(3,1fr)/repeat(3,1fr); padding:11px; }
-  .pip { width:15px; height:15px; border-radius:50%; background: radial-gradient(circle at 35% 30%,#555,#000); align-self:center; justify-self:center; }
+  #controls { display:flex; align-items:center; gap:10px; }
+  .slots { display:flex; justify-content:space-between; align-items:center; min-height:92px; }
+  .slot { flex:1; display:flex; align-items:center; }
+  .slot.r { justify-content:flex-end; }
+  #diceScene { filter: drop-shadow(0 0 10px var(--seat, #fff)); pointer-events:none; }
+  #rollBtn { position:relative; z-index:2; }
+  #diceScene { width:68px; height:68px; perspective:400px; }
+  #dice { width:68px; height:68px; position:relative; transform-style:preserve-3d; transition: transform 1s cubic-bezier(.2,.8,.25,1); }
+  .face { position:absolute; width:68px; height:68px; background: linear-gradient(145deg,#fff,#dcdcdc); border-radius:12px;
+          border:1px solid #bbb; backface-visibility:hidden; display:grid; grid-template:repeat(3,1fr)/repeat(3,1fr); padding:9px; }
+  .pip { width:12px; height:12px; border-radius:50%; background: radial-gradient(circle at 35% 30%,#555,#000); align-self:center; justify-self:center; }
   .face.f1 .pip { background: radial-gradient(circle at 35% 30%,#ff6b6b,#b00000); }
   #msg { text-align:center; margin-top:10px; min-height:22px; opacity:.9; }
-  #rollBtn { min-width:150px; font-size:20px; }
+  #rollBtn { min-width:96px; padding:11px 14px; font-size:18px; }
   .hide { display:none !important; }
   #winner { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:9; text-align:center; padding:20px; }
   #winner h2 { font-size:34px; color:var(--gold); margin:0; }
@@ -80,12 +85,19 @@
 
 <div id="game" class="hide">
   <div id="top"><div>Room <span id="roomCode"></span></div><div><span id="leaveBtn" style="cursor:pointer;font-size:13px;opacity:.8;margin-right:14px">Leave</span><span id="muteBtn" style="cursor:pointer">🔊</span></div></div>
-  <div id="boardWrap"><canvas id="board"></canvas></div>
-  <div id="players"></div>
-  <div id="controls">
-    <div id="diceScene"><div id="dice"></div></div>
-    <button id="rollBtn" disabled>ROLL</button>
+  <div class="slots">
+    <div class="slot" id="slot0"><div id="controls">
+      <div id="diceScene"><div id="dice"></div></div>
+      <button id="rollBtn" disabled>ROLL</button>
+    </div></div>
+    <div class="slot r" id="slot1"></div>
   </div>
+  <div id="boardWrap"><canvas id="board"></canvas></div>
+  <div class="slots">
+    <div class="slot" id="slot3"></div>
+    <div class="slot r" id="slot2"></div>
+  </div>
+  <div id="players"></div>
   <div id="msg"></div>
 </div>
 
@@ -149,7 +161,7 @@
   const FACE = [ ['f1',1,'rotateY(0deg)'], ['f6',6,'rotateY(180deg)'], ['f2',2,'rotateY(90deg)'],
                  ['f5',5,'rotateY(-90deg)'], ['f3',3,'rotateX(90deg)'], ['f4',4,'rotateX(-90deg)'] ];
   FACE.forEach(([cls, n, rot]) => {
-    const f = document.createElement('div'); f.className = 'face ' + cls; f.style.transform = rot + ' translateZ(40px)';
+    const f = document.createElement('div'); f.className = 'face ' + cls; f.style.transform = rot + ' translateZ(34px)';
     for (let c = 1; c <= 9; c++) { const cell = document.createElement('div'); if (PIPS[n].includes(c)) cell.className = 'pip'; f.appendChild(cell); }
     diceEl.appendChild(f);
   });
@@ -268,8 +280,16 @@
   }
 
   function setMsg(t) { $('msg').textContent = t; }
+  // Dice + ROLL sit beside the corner (yard) of the player whose turn it is.
+  function placeControls() {
+    const seat = curSeat(); if (seat < 0) return;
+    const slot = $('slot' + seat), c = $('controls');
+    if (slot && c.parentNode !== slot) slot.appendChild(c);
+    $('diceScene').style.setProperty('--seat', COLORS[seat]);
+  }
   function updateUI() {
     if (!cur) return;
+    placeControls();
     $('players').innerHTML = cur.players.map((p, i) => {
       const done = p.tokens.filter(x => x === 56).length;
       const lp = lobbyPlayers.find(q => q.seat === p.seat);
