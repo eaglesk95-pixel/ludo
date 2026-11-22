@@ -131,6 +131,18 @@ io.on('connection', socket => {
     io.to(socket.room).emit('moved', { ...res, state: r.state });
   });
 
+  // Emoji reactions (whitelisted, rate-limited)
+  const REACTS = ['😂', '😎', '😡', '👏', '🔥', '😭'];
+  socket.on('react', ({ e }) => {
+    const r = rooms[socket.room];
+    if (!r || !r.state || !REACTS.includes(e)) return;
+    const me = r.players.find(p => p.id === socket.id);
+    const now = Date.now();
+    if (!me || now - (socket.lastReact || 0) < 700) return;
+    socket.lastReact = now;
+    io.to(socket.room).emit('react', { seat: me.seat, e });
+  });
+
   // ---------- Admin ----------
   socket.on('admin:login', ({ secret }, cb) => {
     socket.isAdmin = secret === ADMIN_SECRET;
