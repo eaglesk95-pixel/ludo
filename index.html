@@ -60,6 +60,15 @@
     <input id="roomInput" placeholder="Room code" maxlength="4" style="text-transform:uppercase">
     <div class="row"><button id="joinBtn" class="alt">Join room</button></div>
   </div>
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:10px">Play on this one phone</div>
+    <div class="row">
+      <button class="alt localBtn" data-n="2">2 players</button>
+      <button class="alt localBtn" data-n="3">3 players</button>
+      <button class="alt localBtn" data-n="4">4 players</button>
+    </div>
+    <div style="opacity:.7;font-size:13px;margin-top:8px">Everyone takes turns on this phone.</div>
+  </div>
   <div id="waiting" class="card hide">
     <div>Room: <span id="roomCode2" style="font-weight:800;letter-spacing:3px;color:#ffcf4a;font-size:22px"></span></div>
     <div id="lobbyPlayers" style="margin:10px 0"></div>
@@ -70,7 +79,7 @@
 </div>
 
 <div id="game" class="hide">
-  <div id="top"><div>Room <span id="roomCode"></span></div><div id="muteBtn" style="cursor:pointer">🔊</div></div>
+  <div id="top"><div>Room <span id="roomCode"></span></div><div><span id="leaveBtn" style="cursor:pointer;font-size:13px;opacity:.8;margin-right:14px">Leave</span><span id="muteBtn" style="cursor:pointer">🔊</span></div></div>
   <div id="boardWrap"><canvas id="board"></canvas></div>
   <div id="players"></div>
   <div id="controls">
@@ -155,26 +164,42 @@
   // ---- state ----
   const $ = id => document.getElementById(id);
   const socket = io();
-  let mySeat = -1, roomCode = '', lobbyPlayers = [], cur = null, shown = [], movable = [], busy = false, anim = null;
+  let localMode = false, mySeat = -1, roomCode = '', lobbyPlayers = [], cur = null, shown = [], movable = [], busy = false, anim = null;
   let queue = Promise.resolve();
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const nameOf = seat => (lobbyPlayers.find(p => p.seat === seat) || {}).name || ('P' + (seat + 1));
   const curSeat = () => cur ? cur.players[cur.turn].seat : -1;
+  const isMine = () => localMode || curSeat() === mySeat;
+  function turnText(extra) {
+    if (localMode) return nameOf(curSeat()) + "'s turn — " + (extra ? 'roll again!' : 'roll the dice!');
+    return curSeat() === mySeat ? (extra ? 'Extra turn — roll again!' : 'Your turn — roll the dice!') : nameOf(curSeat()) + "'s turn";
+  }
+  // Remember the room so the page can rejoin after a reload / phone sleep / network drop.
+  function saveSession(room, token) { try { localStorage.setItem('ludoSession', JSON.stringify({ room, token })); } catch (e) {} }
+  function loadSession() { try { return JSON.parse(localStorage.getItem('ludoSession')); } catch (e) { return null; } }
+  function clearSession() { try { localStorage.removeItem('ludoSession'); } catch (e) {} }
 
   function err(t) { $('err').textContent = t || ''; }
 
   $('createBtn').onclick = () => {
     ac().resume(); const name = $('name').value.trim() || 'Player';
-    socket.emit('createRoom', { name }, r => { if (r.ok) enterWaiting(r.room, r.seat, [{ name, seat: 0 }]); });
+    socket.emit('createRoom', { name }, r => { if (r.ok) { saveSession(r.room, r.token); enterWaiting(r.room, r.seat, [{ name, seat: 0 }]); } });
   };
   $('joinBtn').onclick = () => {
     ac().resume(); const name = $('name').value.trim() || 'Player'; const room = $('roomInput').value.trim().toUpperCase();
-    socket.emit('joinRoom', { name, room }, r => { if (r.ok) enterWaiting(r.room, r.seat, null); else err(r.error); });
+    socket.emit('joinRoom', { name, room }, r => { if (r.ok) { saveSession(r.room, r.token); enterWaiting(r.room, r.seat, null); } else err(r.error); });
   };
+  document.querySelectorAll('.localBtn').forEach(b => b.onclick = () => {
+    ac().resume();
+    socket.emit('createRoom', { local: true, count: +b.dataset.n }, r => {
+      if (r.ok) { localMode = true; mySeat = r.seat; roomCode = r.room; $('roomCode').textContent = r.room; saveSession(r.room, r.token); }
+    });
+  });
+  $('leaveBtn').onclick = () => { if (confirm('Leave this game?')) { clearSession(); location.reload(); } };
   $('startBtn').onclick = () => socket.emit('startGame');
   $('rollBtn').onclick = () => { ac().resume(); $('rollBtn').disabled = true; socket.emit('rollDice'); };
   $('muteBtn').onclick = () => { muted = !muted; $('muteBtn').textContent = muted ? '🔇' : '🔊'; };
-  $('againBtn').onclick = () => location.reload();
+  $('againBtn').onclick = () => { clearSession(); location.reload(); };
 
   function enterWaiting(room, seat, players) {
     roomCode = room; mySeat = seat; err('');
@@ -186,11 +211,21 @@
     lobbyPlayers = players;
     $('lobbyPlayers').innerHTML = players.map(p => `<span class="chip" style="color:${COLORS[p.seat]}">${p.name}</span> `).join('');
   }
-  socket.on('lobby', d => { renderLobby(d.players); });
+  socket.on('lobby', d => { renderLobby(d.players); if (cur) updateUI(); });
+
+  // (Re)connected: if we were in a room, get back into it.
+  socket.on('connect', () => {
+    const s = loadSession(); if (!s) return;
+    socket.emit('rejoin', s, r => {
+      if (!r || !r.ok) { clearSession(); return; }
+      roomCode = r.room; mySeat = r.seat; localMode = !!r.local; $('roomCode').textContent = r.room;
+      if (!r.started) enterWaiting(r.room, r.seat, null);
+    });
+  });
   socket.on('state', d => {
     lobbyPlayers = d.players; cur = d.state; shown = cur.players.map(p => p.tokens.slice());
     $('lobby').classList.add('hide'); $('game').classList.remove('hide'); resize(); updateUI();
-    setMsg(curSeat() === mySeat ? 'Your turn — roll the dice!' : nameOf(curSeat()) + "'s turn");
+    setMsg(turnText(false));
   });
 
   socket.on('rolled', ev => { queue = queue.then(() => onRolled(ev)); });
@@ -202,8 +237,8 @@
     cur = ev.state;
     if (ev.passed) {
       setMsg(ev.reason === 'three sixes' ? 'Three sixes — turn lost!' : 'No move possible');
-      await sleep(700);
-    } else if (curSeat() === mySeat) {
+      await sleep(700); setMsg(turnText(false));
+    } else if (isMine()) {
       movable = ev.moves; setMsg('Tap a glowing token to move');
       if (ev.moves.length === 1) { /* single choice: still let the player tap, keeps control */ }
     } else setMsg(nameOf(curSeat()) + ' is choosing...');
@@ -221,11 +256,11 @@
     if (ev.captured) { sfx.capture(); shown[ev.captured.player][ev.captured.token] = -1; await sleep(350); }
     cur = ev.state; busy = false; updateUI();
     if (ev.gameOver) {
-      sfx.win(); const w = cur.winners.map(i => nameOf(cur.players[i].seat));
+      clearSession(); sfx.win(); const w = cur.winners.map(i => nameOf(cur.players[i].seat));
       $('winnerText').textContent = '🏆 ' + w[0] + ' wins!'; $('winner').classList.remove('hide');
       return;
     }
-    setMsg(curSeat() === mySeat ? (ev.extraTurn ? 'Extra turn — roll again!' : 'Your turn — roll the dice!') : nameOf(curSeat()) + "'s turn");
+    setMsg(turnText(ev.extraTurn));
   }
 
   function hop(pi, seat, t, a, b) {
@@ -237,9 +272,11 @@
     if (!cur) return;
     $('players').innerHTML = cur.players.map((p, i) => {
       const done = p.tokens.filter(x => x === 56).length;
-      return `<span class="chip ${i === cur.turn ? 'turn' : ''}" style="color:${COLORS[p.seat]}">${nameOf(p.seat)} · ${done}/4</span>`;
+      const lp = lobbyPlayers.find(q => q.seat === p.seat);
+      const off = !localMode && lp && lp.connected === false ? ' · offline' : '';
+      return `<span class="chip ${i === cur.turn ? 'turn' : ''}" style="color:${COLORS[p.seat]}">${nameOf(p.seat)} · ${done}/4${off}</span>`;
     }).join('');
-    $('rollBtn').disabled = !(curSeat() === mySeat && !cur.rolled && !busy && cur.winners.length < cur.players.length - 1);
+    $('rollBtn').disabled = !(isMine() && !cur.rolled && !busy && cur.winners.length < cur.players.length - 1);
   }
 
   // ---- canvas drawing ----
@@ -306,14 +343,14 @@
     items.forEach(it => { const k = it.p[0].toFixed(1) + ',' + it.p[1].toFixed(1); (groups[k] ||= []).push(it); });
     Object.values(groups).forEach(g => g.forEach((it, i) => { if (g.length > 1) { it.p[0] += (i - (g.length - 1) / 2) * 0.18; } }));
     items.sort((a, b) => a.p[1] - b.p[1]);
-    const mine = curSeat() === mySeat;
+    const mine = isMine();
     items.forEach(it => {
       const x = it.p[0] * U, y = it.p[1] * U, r = U * .36, lift = it.p[2] ? U * .1 : 0;
       ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x, y + r * .7, r * .9, r * .4, 0, 0, 7); ctx.fill();
       const g = ctx.createRadialGradient(x - r * .3, y - r * .4 - lift, r * .1, x, y - lift, r * 1.1);
       g.addColorStop(0, '#fff'); g.addColorStop(.25, COLORS[it.seat]); g.addColorStop(1, DARK[it.seat]);
       ctx.fillStyle = g; circ(x, y - lift, r); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
-      if (mine && !busy && cur.players[it.pi].seat === mySeat && it.pi === cur.turn && movable.includes(it.t)) {
+      if (mine && !busy && (localMode || cur.players[it.pi].seat === mySeat) && it.pi === cur.turn && movable.includes(it.t)) {
         const pulse = (Math.sin(now / 160) + 1) / 2;
         ctx.strokeStyle = `rgba(255,255,255,${.5 + pulse * .5})`; ctx.lineWidth = 3; circ(x, y - lift, r + 4 + pulse * 4); ctx.stroke();
       }
@@ -330,7 +367,7 @@
   requestAnimationFrame(frame);
 
   cv.addEventListener('pointerdown', e => {
-    if (!cur || busy || curSeat() !== mySeat || !movable.length) return;
+    if (!cur || busy || !isMine() || !movable.length) return;
     const rect = cv.getBoundingClientRect(), mx = (e.clientX - rect.left) / rect.width * 15, my = (e.clientY - rect.top) / rect.height * 15;
     let best = null, bd = 1e9; const now = performance.now();
     movable.forEach(t => { const [x, y] = tokenPos(cur.turn, t, now); const d = Math.hypot(x - mx, y - my); if (d < bd) { bd = d; best = t; } });

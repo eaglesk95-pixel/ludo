@@ -89,12 +89,13 @@
     $('rooms').innerHTML = list.map(r => `
       <div class="card">
         <div class="room"><span class="code">${r.room}</span>
-          <span class="badge">${r.started ? 'In game' : 'Lobby'}</span></div>
+          <span class="badge">${r.local ? 'One phone · ' : ''}${r.started ? 'In game' : 'Lobby'}</span></div>
         ${r.players.map(p => {
           const f = (r.forced || {})[p.seat];
           return `<div class="player">
             <div class="pname"><span class="dot" style="background:${COLORS[p.seat]}"></span>${esc(p.name)}
               <span style="opacity:.6;font-weight:400">(${NAMES[p.seat]})</span>
+              ${(!r.local && p.connected === false) ? '<span style="color:#ff9a9a;font-size:12px">offline</span>' : ''}
               ${r.turnSeat === p.seat ? '<span class="turn">● their turn</span>' : ''}</div>
             <div class="dice">${[1,2,3,4,5,6].map(n =>
               `<button class="${f === n ? 'on' : ''}" data-room="${r.room}" data-seat="${p.seat}" data-v="${n}">${n}</button>`).join('')}</div>
